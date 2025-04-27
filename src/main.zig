@@ -51,8 +51,8 @@ const State = struct {
     tree: *ts.Tree,
 
     const Self = @This();
-    fn init(uri: []const u8, content: []const u8) Self {
-        const language = Language.init(uri).?;
+    fn init(uri: []const u8, content: []const u8) ?Self {
+        const language = Language.init(uri) orelse return null;
         const parser = ts.Parser.create();
         parser.setLanguage(language.tsLanguage()) catch unreachable;
         const tree = parser.parseString(content, null) orelse unreachable;
@@ -92,16 +92,18 @@ pub fn main() !u8 {
     return res;
 }
 
-fn handleOpenDoc(p: Lsp.OpenDocumentParameters) Lsp.OpenDocumentReturn {
-    p.context.state = State.init(p.context.document.uri, p.context.document.text);
-    sendDiagnostics(p.arena, p.context);
+fn handleOpenDoc(p: Lsp.OpenDocumentParameters) void {
+    p.context.state = State.init(p.context.document.uri, p.context.document.text) orelse return;
+    sendDiagnostics(p.arena, p.context.state.?, p.context.document);
 }
 
 fn handleCloseDoc(p: Lsp.CloseDocumentParameters) void {
-    p.context.state.?.deinit();
+    const state = p.context.state orelse return;
+    state.deinit();
 }
 
-fn handleChangeDoc(p: Lsp.ChangeDocumentParameters) Lsp.ChangeDocumentReturn {
+fn handleChangeDoc(p: Lsp.ChangeDocumentParameters) void {
+    const state = p.context.state orelse return;
     const doc = p.context.document;
     for (p.changes) |c| {
         const start_pos = c.range.start;
@@ -114,7 +116,7 @@ fn handleChangeDoc(p: Lsp.ChangeDocumentParameters) Lsp.ChangeDocumentReturn {
         const old_end_point = posToPoint(old_end_pos);
         const new_end_point = posToPoint(new_end_pos);
 
-        p.context.state.?.tree.edit(.{
+        state.tree.edit(.{
             .start_byte = @intCast(start_byte),
             .old_end_byte = @intCast(old_end_byte),
             .new_end_byte = @intCast(new_end_byte),
@@ -123,7 +125,7 @@ fn handleChangeDoc(p: Lsp.ChangeDocumentParameters) Lsp.ChangeDocumentReturn {
             .new_end_point = new_end_point,
         });
 
-        p.context.state.?.tree = p.context.state.?.parser.parseString(doc.text, p.context.state.?.tree).?;
+        p.context.state.?.tree = state.parser.parseString(doc.text, state.tree).?;
     }
 }
 
@@ -131,19 +133,19 @@ fn posToPoint(p: lsp.types.Position) ts.Point {
     return .{ .row = @intCast(p.line), .column = @intCast(p.character) };
 }
 
-fn handleSave(p: Lsp.SaveDocumentParameters) Lsp.SaveDocumentReturn {
-    sendDiagnostics(p.arena, p.context);
+fn handleSave(p: Lsp.SaveDocumentParameters) void {
+    const state = p.context.state orelse return;
+    sendDiagnostics(p.arena, state, p.context.document);
 }
 
-fn sendDiagnostics(arena: std.mem.Allocator, c: *Lsp.Context) void {
-    const doc = c.document;
-
-    var tests = testNames(arena, c.state.?, c.document);
+fn sendDiagnostics(arena: std.mem.Allocator, state: State, doc: lsp.Document) void {
+    var tests = testNames(arena, state, doc);
+    if (tests.len == 0) return;
 
     var diagnostics = std.ArrayList(lsp.types.Diagnostic).init(arena);
 
-    const file = uriToFilename(c.document.uri);
-    c.state.?.language.runTests(arena, file, &tests);
+    const file = uriToFilename(doc.uri);
+    state.language.runTests(arena, file, &tests);
 
     for (tests) |t| {
         const start = lsp.Document.idxToPos(doc.text, t.start_idx).?;
