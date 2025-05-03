@@ -63,6 +63,10 @@ const State = struct {
         };
     }
 
+    fn parse(self: *Self, content: []const u8) void {
+        self.tree = self.parser.parseString(content, null) orelse unreachable;
+    }
+
     fn deinit(self: Self) void {
         self.tree.destroy();
         const language = self.parser.getLanguage().?;
@@ -70,21 +74,22 @@ const State = struct {
         language.destroy();
     }
 };
-const Lsp = lsp.Lsp(State);
+const Lsp = lsp.Lsp(.{
+    .state_type = State,
+    .document_sync = .None,
+    .full_text_on_save = true,
+});
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const allocator = debug_allocator.allocator();
 
 var server: Lsp = undefined;
 pub fn main() !u8 {
-    const server_data = lsp.types.ServerData{
-        .serverInfo = .{ .name = "server_name", .version = "0.1.0" },
-    };
-    server = Lsp.init(allocator, server_data);
+    const server_info = lsp.types.ServerInfo{ .name = "assay", .version = "0.1.0" };
+    server = Lsp.init(allocator, server_info);
 
     server.registerDocOpenCallback(handleOpenDoc);
     server.registerDocCloseCallback(handleCloseDoc);
-    server.registerDocChangeCallback(handleChangeDoc);
     server.registerDocSaveCallback(handleSave);
 
     const res = server.start();
@@ -102,39 +107,13 @@ fn handleCloseDoc(p: Lsp.CloseDocumentParameters) void {
     state.deinit();
 }
 
-fn handleChangeDoc(p: Lsp.ChangeDocumentParameters) void {
-    const state = p.context.state orelse return;
-    const doc = p.context.document;
-    for (p.changes) |c| {
-        const start_pos = c.range.start;
-        const old_end_pos = c.range.end;
-        const start_byte = lsp.Document.posToIdx(doc.text, start_pos).?;
-        const old_end_byte = lsp.Document.posToIdx(doc.text, old_end_pos).?;
-        const new_end_byte = start_byte + c.text.len;
-        const new_end_pos = lsp.Document.idxToPos(doc.text, new_end_byte).?;
-        const start_point = posToPoint(start_pos);
-        const old_end_point = posToPoint(old_end_pos);
-        const new_end_point = posToPoint(new_end_pos);
-
-        state.tree.edit(.{
-            .start_byte = @intCast(start_byte),
-            .old_end_byte = @intCast(old_end_byte),
-            .new_end_byte = @intCast(new_end_byte),
-            .start_point = start_point,
-            .old_end_point = old_end_point,
-            .new_end_point = new_end_point,
-        });
-
-        p.context.state.?.tree = state.parser.parseString(doc.text, state.tree).?;
-    }
-}
-
 fn posToPoint(p: lsp.types.Position) ts.Point {
     return .{ .row = @intCast(p.line), .column = @intCast(p.character) };
 }
 
 fn handleSave(p: Lsp.SaveDocumentParameters) void {
-    const state = p.context.state orelse return;
+    var state = p.context.state orelse return;
+    state.parse(p.context.document.text);
     sendDiagnostics(p.arena, state, p.context.document);
 }
 
@@ -151,7 +130,7 @@ fn sendDiagnostics(arena: std.mem.Allocator, state: State, doc: lsp.Document) vo
         const start = lsp.Document.idxToPos(doc.text, t.start_idx).?;
         const end = lsp.Document.idxToPos(doc.text, t.end_idx).?;
         const message = if (t.pass) "Test pased" else (t.output orelse "Test failed");
-        const severity: i32 = if (t.pass) 3 else 1;
+        const severity: lsp.types.DiagnosticSeverity = if (t.pass) .Information else .Error;
 
         diagnostics.append(.{
             .message = message,

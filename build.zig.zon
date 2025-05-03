@@ -14,8 +14,8 @@
         },
         .tree_sitter_zig = .{ .url = "https://github.com/tree-sitter-grammars/tree-sitter-zig/archive/refs/tags/v1.1.2.tar.gz", .hash = "N-V-__8AAN6NXgCZxLUnqe4620P_FqHrEY8PHTA1-VlOn4yX" },
         .babel = .{
-            .url = "https://github.com/mkindberg/babel/archive/refs/tags/v0.10.0.tar.gz",
-            .hash = "babel-0.10.0-zYhD5yAtAQCzDg3gCad6y6JdnBYuTZFh2N29BFAxhzM_",
+            .url = "https://github.com/mkindberg/babel/archive/master.tar.gz",
+            .hash = "babel-0.10.0-zYhD5-MuAQAq3YmMb3tJuTnIM7AAt5XywRheUSW_9z1T",
         },
     },
     .paths = .{
