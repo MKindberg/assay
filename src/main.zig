@@ -5,17 +5,22 @@ const ts = @import("tree-sitter");
 const lsp = @import("lsp");
 
 const Zig = @import("zig.zig").Zig;
+const Rust = @import("rust.zig").Rust;
 
 pub const std_options = std.Options{ .log_level = if (builtin.mode == .Debug) .debug else .info, .logFn = lsp.log };
 
 const Language = union(enum) {
     zig: Zig,
+    rust: Rust,
 
     const Self = @This();
 
     fn init(uri: []const u8) ?Self {
         if (std.mem.endsWith(u8, uri, ".zig")) {
             return .{ .zig = .{} };
+        }
+        if (std.mem.endsWith(u8, uri, ".rs")) {
+            return .{ .rust = .{} };
         }
         return null;
     }
@@ -25,9 +30,9 @@ const Language = union(enum) {
         };
     }
 
-    pub fn tsQuery(self: Self) *ts.Query {
+    pub fn testNames(self: Self, arena: std.mem.Allocator, root: ts.Node, doc: lsp.Document) []TestData {
         return switch (self) {
-            inline else => |l| @TypeOf(l).tsQuery(),
+            inline else => |l| @TypeOf(l).testNames(arena, root, doc),
         };
     }
     pub fn runTests(self: Self, arena: std.mem.Allocator, filename: []const u8, test_data: *[]TestData) void {
@@ -118,7 +123,7 @@ fn handleSave(p: Lsp.SaveDocumentParameters) void {
 }
 
 fn sendDiagnostics(arena: std.mem.Allocator, state: State, doc: lsp.Document) void {
-    var tests = testNames(arena, state, doc);
+    var tests = state.language.testNames(arena, state.tree.rootNode(), doc);
     if (tests.len == 0) return;
 
     var diagnostics = std.ArrayList(lsp.types.Diagnostic).init(arena);
@@ -154,26 +159,4 @@ fn uriToFilename(uri: []const u8) []const u8 {
     const prefix = "file://";
     std.debug.assert(std.mem.startsWith(u8, uri, prefix));
     return uri[prefix.len..];
-}
-
-fn testNames(arena: std.mem.Allocator, state: State, doc: lsp.Document) []TestData {
-    const node = state.tree.rootNode();
-
-    const query = state.language.tsQuery();
-    defer query.destroy();
-
-    const cursor = ts.QueryCursor.create();
-    defer cursor.destroy();
-    cursor.exec(query, node);
-
-    var tests = std.ArrayList(TestData).init(arena);
-    errdefer tests.deinit();
-
-    while (cursor.nextMatch()) |match| {
-        const capture = match.captures[0].node;
-        const start = capture.startByte();
-        const end = capture.endByte();
-        tests.append(.{ .name = doc.text[start..end], .start_idx = start, .end_idx = end }) catch unreachable;
-    }
-    return tests.items;
 }

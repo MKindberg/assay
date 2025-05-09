@@ -19,11 +19,8 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("tree-sitter", tree_sitter.module("tree-sitter"));
 
-    const tree_sitter_zig = b.dependency("tree_sitter_zig", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.addCSourceFile(.{ .file = tree_sitter_zig.path("src/parser.c") });
+    linkTSLib("tree_sitter_zig", b, exe, target, optimize);
+    linkTSLib("tree_sitter_rust", b, exe, target, optimize);
 
     // Babel
     const babel = b.dependency("babel", .{});
@@ -34,4 +31,17 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     const run_step = b.step("run", "Run the example");
     run_step.dependOn(&run_cmd.step);
+}
+
+fn linkTSLib(name: []const u8, b: *std.Build, exe: *std.Build.Step.Compile, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
+    const tree_sitter_lib = b.dependency(name, .{
+        .target = target,
+        .optimize = optimize,
+    });
+    const files = &[_][]const u8{ "src/parser.c", "src/scanner.c" };
+    for (files) |f| {
+        const file = tree_sitter_lib.path(f);
+        std.fs.accessAbsolute(file.getPath(b), .{}) catch continue;
+        exe.addCSourceFile(.{ .file = file });
+    }
 }

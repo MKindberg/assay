@@ -1,8 +1,8 @@
 const std = @import("std");
 const ts = @import("tree-sitter");
+const lsp = @import("lsp");
 
 const TestData = @import("main.zig").TestData;
-
 
 extern fn tree_sitter_zig() callconv(.C) *ts.Language;
 
@@ -11,9 +11,24 @@ pub const Zig = struct {
         return tree_sitter_zig();
     }
 
-    pub fn tsQuery() *ts.Query {
+    pub fn testNames(arena: std.mem.Allocator, root: ts.Node, doc: lsp.Document) []TestData {
+        var tests = std.ArrayList(TestData).init(arena);
+
         var error_offset: u32 = 0;
-        return ts.Query.create(Zig.tsLanguage(), "(test_declaration (string (string_content) @testName))", &error_offset) catch unreachable;
+        const query = ts.Query.create(tsLanguage(), "(test_declaration (string (string_content) @testName))", &error_offset) catch unreachable;
+        defer query.destroy();
+
+        const cursor = ts.QueryCursor.create();
+        defer cursor.destroy();
+        cursor.exec(query, root);
+
+        while (cursor.nextMatch()) |match| {
+            const capture = match.captures[0].node;
+            const start = capture.startByte();
+            const end = capture.endByte();
+            tests.append(.{ .name = doc.text[start..end], .start_idx = start, .end_idx = end }) catch unreachable;
+        }
+        return tests.items;
     }
 
     pub fn runTests(allocator: std.mem.Allocator, filename: []const u8, test_data: *[]TestData) void {
@@ -51,4 +66,3 @@ pub const Zig = struct {
         }
     }
 };
-
