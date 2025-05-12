@@ -40,7 +40,7 @@ pub const Rust = struct {
 
     pub fn runTests(allocator: std.mem.Allocator, filename: []const u8, test_data: *[]TestData) void {
         const output = executeTests(allocator, filename) catch unreachable;
-        parseTestResult(test_data, output);
+        parseTestResult(allocator, test_data, output);
     }
 
     fn executeTests(allocator: std.mem.Allocator, path: []const u8) std.process.Child.RunError!std.process.Child.RunResult {
@@ -51,27 +51,49 @@ pub const Rust = struct {
             "cargo",
             "test",
             module,
+            "--",
+            "--format",
+            "json",
+            "-Z",
+            "unstable-options",
         };
         return std.process.Child.run(.{ .allocator = allocator, .argv = &argv });
     }
 
-    fn parseTestResult(tests: *[]TestData, output: std.process.Child.RunResult) void {
-        var buf: [100]u8 = undefined;
-        for (tests.*) |*t| {
-            const start_str = std.fmt.bufPrint(&buf, "{s} ... ", .{t.name}) catch unreachable;
-            if (std.mem.indexOf(u8, output.stdout, start_str)) |i| {
-                const start_idx = i + start_str.len;
-                if (std.mem.startsWith(u8, output.stdout[start_idx..], "ok")) {
-                    t.pass = true;
-                    t.output = "Test ok";
-                } else {
-                    t.pass = false;
-                    t.output = "Test failed";
-                }
-            } else {
-                // Probably compilation error
+    const CargoResult = struct {
+        type: []const u8,
+        event: []const u8,
+        name: ?[]const u8 = null,
+        stdout: ?[]const u8 = null,
+    };
+
+    fn parseTestResult(allocator: std.mem.Allocator, tests: *[]TestData, output: std.process.Child.RunResult) void {
+        if (output.stdout.len == 0) {
+            // Probably compilation error
+            for (tests.*) |*t| {
                 t.pass = false;
                 t.output = output.stderr;
+            }
+        }
+        var lines = std.mem.splitScalar(u8, output.stdout, '\n');
+        while (lines.next()) |line| {
+            const result = std.json.parseFromSliceLeaky(CargoResult, allocator, line, .{ .ignore_unknown_fields = true }) catch continue;
+            if (!std.mem.eql(u8, result.type, "test")) continue;
+            if (std.mem.eql(u8, result.event, "started")) continue;
+            var it = std.mem.splitBackwardsSequence(u8, result.name.?, "::");
+            const name = it.next().?;
+
+            for (tests.*) |*t| {
+                if (std.mem.eql(u8, t.name, name)) {
+                    if (std.mem.eql(u8, result.event, "ok")) {
+                        t.pass = true;
+                        t.output = "Test ok";
+                    } else if (std.mem.eql(u8, result.event, "failed")) {
+                        t.pass = false;
+                        t.output = result.stdout orelse "TEST FAILEd";
+                    }
+                    break;
+                }
             }
         }
     }
