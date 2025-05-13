@@ -60,9 +60,56 @@ pub const Rust = struct {
         return std.process.Child.run(.{ .allocator = allocator, .argv = &argv });
     }
 
+    const TestType = enum {
+        Suite,
+        Test,
+
+        const Self = @This();
+        pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !Self {
+            _ = options;
+            switch (try source.nextAlloc(allocator, .alloc_if_needed)) {
+                inline .string, .allocated_string => |s| {
+                    if (std.mem.eql(u8, s, "suite")) {
+                        return .Suite;
+                    } else if (std.mem.eql(u8, s, "test")) {
+                        return .Test;
+                    } else {
+                        return error.UnexpectedToken;
+                    }
+                },
+                else => return error.UnexpectedToken,
+            }
+        }
+    };
+
+    const TestEvent = enum {
+        Starting,
+        Ok,
+        Failed,
+
+        const Self = @This();
+        pub fn jsonParse(allocator: std.mem.Allocator, source: anytype, options: std.json.ParseOptions) !Self {
+            _ = options;
+            switch (try source.nextAlloc(allocator, .alloc_if_needed)) {
+                inline .string, .allocated_string => |s| {
+                    if (std.mem.eql(u8, s, "starting")) {
+                        return .Starting;
+                    } else if (std.mem.eql(u8, s, "ok")) {
+                        return .Ok;
+                    } else if (std.mem.eql(u8, s, "failed")) {
+                        return .Failed;
+                    } else {
+                        return error.UnexpectedToken;
+                    }
+                },
+                else => return error.UnexpectedToken,
+            }
+        }
+    };
+
     const CargoResult = struct {
-        type: []const u8,
-        event: []const u8,
+        type: TestType,
+        event: TestEvent,
         name: ?[]const u8 = null,
         stdout: ?[]const u8 = null,
     };
@@ -78,19 +125,18 @@ pub const Rust = struct {
         var lines = std.mem.splitScalar(u8, output.stdout, '\n');
         while (lines.next()) |line| {
             const result = std.json.parseFromSliceLeaky(CargoResult, allocator, line, .{ .ignore_unknown_fields = true }) catch continue;
-            if (!std.mem.eql(u8, result.type, "test")) continue;
-            if (std.mem.eql(u8, result.event, "started")) continue;
+            if (result.type != .Test) continue;
+            if (result.event == .Starting) continue;
             var it = std.mem.splitBackwardsSequence(u8, result.name.?, "::");
             const name = it.next().?;
 
             for (tests.*) |*t| {
                 if (std.mem.eql(u8, t.name, name)) {
-                    if (std.mem.eql(u8, result.event, "ok")) {
+                    if (result.event == .Ok) {
                         t.pass = true;
-                        t.output = "Test ok";
-                    } else if (std.mem.eql(u8, result.event, "failed")) {
+                    } else if (result.event == .Failed) {
                         t.pass = false;
-                        t.output = result.stdout orelse "TEST FAILEd";
+                        t.output = result.stdout;
                     }
                     break;
                 }
