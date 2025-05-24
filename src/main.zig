@@ -123,6 +123,12 @@ fn handleSave(p: Lsp.SaveDocumentParameters) void {
 }
 
 fn sendDiagnostics(arena: std.mem.Allocator, state: State, doc: lsp.Document) void {
+    const clear_diagnostics = lsp.types.Notification.PublishDiagnostics{
+        .params = .{
+            .uri = doc.uri,
+        },
+    };
+    server.writeResponse(arena, clear_diagnostics) catch unreachable;
     var tests = state.language.testNames(arena, state.tree.rootNode(), doc);
     if (tests.len == 0) return;
 
