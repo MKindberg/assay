@@ -17,8 +17,8 @@
             .hash = "N-V-__8AAN6NXgCZxLUnqe4620P_FqHrEY8PHTA1-VlOn4yX",
         },
         .babel = .{
-            .url = "https://github.com/mkindberg/babel/archive/master.tar.gz",
-            .hash = "babel-0.10.0-zYhD5-MuAQAq3YmMb3tJuTnIM7AAt5XywRheUSW_9z1T",
+            .url = "https://github.com/mkindberg/babel/archive/refs/tags/v0.11.0.tar.gz",
+            .hash = "babel-0.10.0-zYhD50xeAQAmh4Q6Tnu6RHkaFsrKGEnBbWdRrN8YbbLt",
         },
         .tree_sitter_rust = .{
             .url = "https://github.com/tree-sitter/tree-sitter-rust/archive/refs/tags/v0.24.0.tar.gz",

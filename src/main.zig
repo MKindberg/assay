@@ -79,11 +79,7 @@ const State = struct {
         language.destroy();
     }
 };
-const Lsp = lsp.Lsp(.{
-    .state_type = State,
-    .document_sync = .None,
-    .full_text_on_save = true,
-});
+const Lsp = lsp.Lsp(.{ .state_type = State, .update_doc_on_change = false });
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 const allocator = debug_allocator.allocator();
@@ -96,6 +92,7 @@ pub fn main() !u8 {
     server.registerDocOpenCallback(handleOpenDoc);
     server.registerDocCloseCallback(handleCloseDoc);
     server.registerDocSaveCallback(handleSave);
+    server.registerDocChangeCallback(handleChange);
 
     const res = server.start();
 
@@ -112,13 +109,35 @@ fn handleCloseDoc(p: Lsp.CloseDocumentParameters) void {
     state.deinit();
 }
 
+fn handleChange(p: Lsp.ChangeDocumentParameters) void {
+    var doc: lsp.Document = p.context.document;
+    var tree: *ts.Tree = p.context.state.?.tree;
+    var parser: *ts.Parser = p.context.state.?.parser;
+    for (p.changes) |c| {
+        var edit = ts.InputEdit{
+            .start_byte = @intCast(doc.posToIdx(c.range.?.start).?),
+            .old_end_byte = @intCast(doc.posToIdx(c.range.?.end).?),
+            .start_point = posToPoint(c.range.?.start),
+            .old_end_point = posToPoint(c.range.?.end),
+            .new_end_byte = 0,
+            .new_end_point = .{ .row = 0, .column = 0 },
+        };
+        doc.update(c) catch unreachable;
+        edit.new_end_byte = @intCast(edit.start_byte + c.text.len);
+        edit.new_end_point = posToPoint(doc.idxToPos(edit.new_end_byte).?);
+
+        tree.edit(edit);
+        tree = parser.parseString(doc.text, tree).?;
+        p.context.state.?.tree = tree;
+    }
+}
+
 fn posToPoint(p: lsp.types.Position) ts.Point {
     return .{ .row = @intCast(p.line), .column = @intCast(p.character) };
 }
 
 fn handleSave(p: Lsp.SaveDocumentParameters) void {
-    var state = p.context.state orelse return;
-    state.parse(p.context.document.text);
+    const state: State = p.context.state orelse return;
     sendDiagnostics(p.arena, state, p.context.document);
 }
 
@@ -138,8 +157,8 @@ fn sendDiagnostics(arena: std.mem.Allocator, state: State, doc: lsp.Document) vo
     state.language.runTests(arena, file, &tests);
 
     for (tests) |t| {
-        const start = lsp.Document.idxToPos(doc.text, t.start_idx).?;
-        const end = lsp.Document.idxToPos(doc.text, t.end_idx).?;
+        const start = doc.idxToPos(t.start_idx).?;
+        const end = doc.idxToPos(t.end_idx).?;
         const message = if (t.pass) "Test pased" else (t.output orelse "Test failed");
         const severity: lsp.types.DiagnosticSeverity = if (t.pass) .Information else .Error;
 
