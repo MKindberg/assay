@@ -55,8 +55,12 @@ pub const Zig = struct {
                     t.pass = true;
                 } else {
                     t.pass = false;
-                    const end_idx = std.mem.indexOfPos(u8, output.stderr, start_idx, "FAIL").?;
-                    t.output = output.stderr[start_idx..end_idx];
+                    if (std.mem.indexOfPos(u8, output.stderr, start_idx, "FAIL")) |end_idx| {
+                        t.output = output.stderr[start_idx..end_idx];
+                    } else {
+                        // Probably panic
+                        t.output = output.stderr[start_idx..];
+                    }
                 }
             } else {
                 // Probably compilation error
